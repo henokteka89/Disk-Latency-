@@ -1,0 +1,127 @@
+--SUMMARIZE LATENCY
+-- https://support.q2.co.id/support/solutions/articles/70000582674-mssql-disk-latency-check-query
+SELECT
+
+        DISK_Drive                                                                                                                                                    ,
+
+        CASE WHEN DISK_num_of_reads      = 0 THEN 0 ELSE (DISK_io_stall_read_ms                    /DISK_num_of_reads) END                                                               AS [Read Latency]   ,
+
+        CASE WHEN DISK_io_stall_write_ms = 0 THEN 0 ELSE (DISK_io_stall_write_ms                   /DISK_num_of_writes) END                                                              AS [Write Latency]  ,
+
+        CASE WHEN (DISK_num_of_reads = 0 AND     DISK_num_of_writes = 0) THEN 0 ELSE (io_stall/(DISK_num_of_reads + DISK_num_of_writes)) END                                        AS [Overall Latency],
+
+        CASE WHEN DISK_num_of_reads      = 0 THEN 0 ELSE (DISK_num_of_bytes_read                        /DISK_num_of_reads) END                                                          AS [AVG Bytes/Read] ,
+
+        CASE WHEN DISK_io_stall_write_ms = 0 THEN 0 ELSE (DISK_num_of_bytes_written                     /DISK_num_of_writes) END                                                         AS [AVG Bytes/Write],
+
+        CASE WHEN (DISK_num_of_reads = 0 AND     DISK_num_of_writes = 0) THEN 0 ELSE ((DISK_num_of_bytes_read + DISK_num_of_bytes_written)/(DISK_num_of_reads + DISK_num_of_writes)) END AS [AVG Bytes/Transfer]
+
+FROM
+
+        (
+
+                SELECT
+
+                        LEFT(UPPER(mf.physical_name), 2) AS DISK_Drive               ,
+
+                        SUM(num_of_reads)                AS DISK_num_of_reads        ,
+
+                        SUM(io_stall_read_ms)            AS DISK_io_stall_read_ms    ,
+
+                        SUM(num_of_writes)               AS DISK_num_of_writes       ,
+
+                        SUM(io_stall_write_ms)           AS DISK_io_stall_write_ms   ,
+
+                       SUM(num_of_bytes_read)           AS DISK_num_of_bytes_read   ,
+
+                        SUM(num_of_bytes_written)        AS DISK_num_of_bytes_written,
+
+                        SUM(io_stall)                    AS io_stall
+
+                FROM
+
+                        sys.dm_io_virtual_file_stats(NULL, NULL) AS vfs
+
+                INNER JOIN
+
+                        sys.master_files AS mf WITH (NOLOCK)
+
+                ON
+
+                        vfs.database_id = mf.database_id
+
+                AND     vfs.file_id     = mf.file_id
+
+                GROUP BY
+
+                        LEFT(UPPER(mf.physical_name), 2)) A
+
+--LATENCY PER DB FILE (MDF, LDF)
+
+SELECT
+
+[ReadLatency] =
+
+CASE WHEN [num_of_reads] = 0
+
+THEN 0 ELSE ([io_stall_read_ms] / [num_of_reads]) END,
+
+[WriteLatency] =
+
+CASE WHEN [num_of_writes] = 0
+
+THEN 0 ELSE ([io_stall_write_ms] / [num_of_writes]) END,
+
+[Latency] =
+
+CASE WHEN ([num_of_reads] = 0 AND [num_of_writes] = 0)
+
+THEN 0 ELSE ([io_stall] / ([num_of_reads] + [num_of_writes])) END,
+
+[AvgBPerRead] =
+
+CASE WHEN [num_of_reads] = 0
+
+THEN 0 ELSE ([num_of_bytes_read] / [num_of_reads]) END,
+
+[AvgBPerWrite] =
+
+CASE WHEN [num_of_writes] = 0
+
+THEN 0 ELSE ([num_of_bytes_written] / [num_of_writes]) END,
+
+[AvgBPerTransfer] =
+
+CASE WHEN ([num_of_reads] = 0 AND [num_of_writes] = 0)
+
+THEN 0 ELSE
+
+(([num_of_bytes_read] + [num_of_bytes_written]) /
+
+([num_of_reads] + [num_of_writes])) END,
+
+LEFT ([mf].[physical_name], 2) AS [Drive],
+
+DB_NAME ([vfs].[database_id]) AS [DB],
+
+[mf].[physical_name]
+
+FROM
+
+sys.dm_io_virtual_file_stats (NULL,NULL) AS [vfs]
+
+JOIN sys.master_files AS [mf]
+
+ON [vfs].[database_id] = [mf].[database_id]
+
+AND [vfs].[file_id] = [mf].[file_id]
+
+-- WHERE [vfs].[file_id] = 2 -- log files
+
+-- ORDER BY [Latency] DESC
+
+-- ORDER BY [ReadLatency] DESC
+
+--ORDER BY [WriteLatency] DESC;
+
+GO
